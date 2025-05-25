@@ -192,7 +192,6 @@ const Oportunidades: React.FC = () => {
     });
     setEditIndex(index);
     
-    // Adiciona scroll suave para o formulário
     const formCard = document.getElementById('formulario-oportunidade');
     if (formCard) {
       formCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -633,8 +632,7 @@ const Oportunidades: React.FC = () => {
               <CardContent>
                 <div className="space-y-3">
                   {CLASSIFICACOES.map(c => {
-                    const valorTotal = oportunidades
-                      .filter(op => op.classificacao === c.value)
+                    const valorTotal = oportunidades.filter(op => op.classificacao === c.value)
                       .reduce((acc, op) => acc + (Number(op.preco.replace(/\D/g, '')) || 0), 0);
                     
                     return (
@@ -659,8 +657,7 @@ const Oportunidades: React.FC = () => {
                 <div className="flex flex-col items-center justify-center h-full">
                   <span className="text-3xl font-bold text-green-900">
                     {formatarPreco(
-                      oportunidades
-                        .reduce((acc, op) => acc + (Number(op.preco.replace(/\D/g, '')) || 0), 0)
+                      oportunidades.reduce((acc, op) => acc + (Number(op.preco.replace(/\D/g, '')) || 0), 0)
                         .toString()
                     )}
                   </span>
