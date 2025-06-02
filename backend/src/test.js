@@ -1,0 +1,38 @@
+const sql = require('mssql');
+
+const config = {
+    server: 'localhost\\SQLEXPRESS',
+    database: 'ControleLenovo',
+    options: {
+        trustServerCertificate: true,
+        enableArithAbort: true,
+        instanceName: 'SQLEXPRESS'
+    },
+    authentication: {
+        type: 'default',
+        options: {
+            userName: '',
+            password: ''
+        }
+    }
+};
+
+async function testConnection() {
+    try {
+        await sql.connect(config);
+        console.log('Conexão com o banco de dados estabelecida com sucesso!');
+        
+        const result = await sql.querySELECT @@VERSION as version;
+        console.log('Versão do SQL Server:', result.recordset[0].version);
+        
+        const tables = await sql.query`SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE'`;
+        console.log('Tabelas encontradas:', tables.recordset.map(t => t.TABLE_NAME));
+        
+    } catch (error) {
+        console.error('Erro ao conectar com o banco de dados:', error);
+    } finally {
+        await sql.close();
+    }
+}
+
+testConnection();
