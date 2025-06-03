@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const supabase = require('./config/supabase');
+const { createClient } = require('@supabase/supabase-js');
+const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -109,36 +111,95 @@ app.get('/api/historico', async (req, res) => {
     }
 });
 
-// Rota para buscar a quota total do ano atual
+// Endpoint para obter a quota total
 app.get('/api/quota-total', async (req, res) => {
-    try {
-        const anoAtual = new Date().getFullYear();
-        const { data, error } = await supabase
-            .from('quota_total')
-            .select('valor')
-            .eq('ano', anoAtual)
-            .single();
-        
-        if (error) {
-            if (error.code === 'PGRST116') {
-                // Se não existir, cria com valor 0
-                const { data: newData, error: insertError } = await supabase
-                    .from('quota_total')
-                    .insert([{ ano: anoAtual, valor: 0 }])
-                    .select()
-                    .single();
-                
-                if (insertError) throw insertError;
-                return res.json({ valor: 0 });
-            }
-            throw error;
-        }
-        
-        res.json({ valor: data.valor });
-    } catch (err) {
-        console.error('Erro ao buscar quota total:', err);
-        res.status(500).json({ error: 'Erro ao buscar quota total' });
+  try {
+    const ano = new Date().getFullYear();
+    
+    const { data, error } = await supabase
+      .from('quota_total')
+      .select('*')
+      .eq('ano', ano)
+      .limit(1);
+
+    if (error) throw error;
+
+    if (!data || data.length === 0) {
+      // Se não existir, cria um registro com valor 0
+      const { data: newData, error: insertError } = await supabase
+        .from('quota_total')
+        .insert([{ ano, valor: 0 }])
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+      return res.json(newData);
     }
+
+    res.json(data[0]);
+  } catch (error) {
+    console.error('Erro ao buscar quota total:', error);
+    res.status(500).json({ error: 'Erro ao buscar quota total' });
+  }
+});
+
+// Endpoint para atualizar a quota total
+app.put('/api/quota-total', async (req, res) => {
+  try {
+    const { valor } = req.body;
+    const ano = new Date().getFullYear();
+
+    console.log('[PUT /api/quota-total] Iniciando atualização');
+    console.log('[PUT /api/quota-total] Valor recebido:', valor, '| Tipo:', typeof valor);
+    console.log('[PUT /api/quota-total] Ano:', ano);
+
+    // Validar o valor
+    if (valor === undefined || valor === null) {
+      console.error('[PUT /api/quota-total] Valor não fornecido');
+      return res.status(400).json({ error: 'Valor não fornecido' });
+    }
+
+    const valorNumerico = Number(valor);
+    console.log('[PUT /api/quota-total] Valor convertido para número:', valorNumerico);
+
+    if (isNaN(valorNumerico)) {
+      console.error('[PUT /api/quota-total] Valor inválido:', valor);
+      return res.status(400).json({ error: 'Valor inválido' });
+    }
+
+    if (valorNumerico < 0) {
+      console.error('[PUT /api/quota-total] Valor negativo:', valorNumerico);
+      return res.status(400).json({ error: 'O valor não pode ser negativo' });
+    }
+
+    // Usar upsert para criar ou atualizar o registro
+    const { data, error } = await supabase
+      .from('quota_total')
+      .upsert({ 
+        ano, 
+        valor: valorNumerico,
+        updated_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('[PUT /api/quota-total] Erro do Supabase:', error);
+      return res.status(500).json({ 
+        error: 'Erro ao salvar quota total', 
+        details: error.message 
+      });
+    }
+
+    console.log('[PUT /api/quota-total] Registro salvo com sucesso:', data);
+    res.json(data);
+  } catch (error) {
+    console.error('[PUT /api/quota-total] Erro não tratado:', error);
+    res.status(500).json({ 
+      error: 'Erro ao salvar quota total',
+      details: error.message 
+    });
+  }
 });
 
 // Rotas POST
@@ -166,16 +227,16 @@ app.post('/api/oportunidades', async (req, res) => {
             registro,
             cliente,
             bid,
-            validadeBid,
-            validadeProposta,
+            validade_bid,
+            validade_proposta,
             preco,
             margem,
             classificacao,
             observacoes,
-            estagioVenda,
+            estagio_venda,
             trimestre,
-            dataWon,
-            dataFaturamento,
+            data_won,
+            data_faturamento,
             regional_id
         } = req.body;
 
@@ -184,86 +245,69 @@ app.post('/api/oportunidades', async (req, res) => {
             registro,
             cliente,
             bid,
-            validadeBid,
-            validadeProposta,
+            validade_bid,
+            validade_proposta,
             preco,
             margem,
             classificacao,
             observacoes,
-            estagioVenda,
+            estagio_venda,
             trimestre,
-            dataWon,
-            dataFaturamento,
+            data_won,
+            data_faturamento,
             regional_id
         });
 
         // Validação dos campos obrigatórios
-        if (!cliente || !regional_id || !preco || !margem || !estagioVenda) {
-            console.log('Campos obrigatórios faltando:', { cliente, regional_id, preco, margem, estagioVenda });
+        if (!cliente || !regional_id || !preco || !margem || !estagio_venda) {
+            console.log('Campos obrigatórios faltando:', { cliente, regional_id, preco, margem, estagio_venda });
             return res.status(400).json({ error: 'Todos os campos obrigatórios devem ser preenchidos' });
         }
 
         // Converte e valida os valores numéricos
         let precoNumerico, margemNumerica;
         try {
-            // Remove caracteres não numéricos exceto ponto e vírgula
-            const precoLimpo = String(preco).replace(/[^\d,.]/g, '').replace(',', '.');
-            const margemLimpa = String(margem).replace(/[^\d,.]/g, '').replace(',', '.');
-            
-            precoNumerico = parseFloat(precoLimpo);
-            margemNumerica = parseFloat(margemLimpa);
-            
-            console.log('Valores convertidos:', { precoNumerico, margemNumerica });
+            precoNumerico = parseFloat(String(preco).replace(/[^\d,.]/g, '').replace(',', '.'));
+            margemNumerica = parseFloat(String(margem).replace(/[^\d,.]/g, '').replace(',', '.'));
         } catch (error) {
-            console.error('Erro ao converter valores:', error);
             return res.status(400).json({ error: 'Valores numéricos inválidos' });
         }
 
         if (isNaN(precoNumerico) || isNaN(margemNumerica)) {
-            console.log('Valores inválidos após conversão:', { precoNumerico, margemNumerica });
             return res.status(400).json({ error: 'Valores numéricos inválidos' });
         }
 
-        // Validação dos valores
         if (precoNumerico <= 0 || margemNumerica <= 0) {
-            console.log('Valores não positivos:', { precoNumerico, margemNumerica });
             return res.status(400).json({ error: 'Preço e margem devem ser maiores que zero' });
         }
 
-        // Validar regional_id
-        console.log('Validando regional_id:', regional_id);
+        // Buscar a regional pelo ID
         const { data: regionais, error: errorRegionais } = await supabase
             .from('regionais')
-            .select('id')
+            .select('*')
             .eq('id', regional_id);
 
-        if (errorRegionais) {
-            console.error('Erro ao validar regional:', errorRegionais);
+        if (errorRegionais || !regionais || regionais.length === 0) {
+            console.error('Erro ao buscar regional:', errorRegionais);
             return res.status(400).json({ error: 'Regional inválida' });
         }
 
-        if (!regionais || regionais.length === 0) {
-            console.error('Regional não encontrada:', regional_id);
-            return res.status(400).json({ error: 'Regional não encontrada' });
-        }
-
-        console.log('Regional encontrada:', regionais[0]);
-
         const novaOportunidade = {
+            id: uuidv4(),
             revenda: revenda || '',
             registro: registro || '',
             cliente,
             bid: bid || '',
-            validade_bid: validadeBid || null,
-            validade_proposta: validadeProposta || null,
+            validade_bid: validade_bid || null,
+            validade_proposta: validade_proposta || null,
             preco: precoNumerico,
             margem: margemNumerica,
             classificacao: classificacao || '',
             observacoes: observacoes || '',
-            estagio_venda: estagioVenda,
+            estagio_venda: estagio_venda,
             trimestre: trimestre || '',
-            data_won: dataWon || null,
-            data_faturamento: dataFaturamento || null,
+            data_won: data_won || null,
+            data_faturamento: data_faturamento || null,
             regional_id: regionais[0].id
         };
 
@@ -314,19 +358,28 @@ app.post('/api/quotas', async (req, res) => {
 
 app.post('/api/historico', async (req, res) => {
     try {
-        const { oportunidade_id, estagioVenda } = req.body;
+        const { oportunidade_id, estagio_venda } = req.body;
+
+        if (!oportunidade_id || !estagio_venda) {
+            return res.status(400).json({ error: 'ID da oportunidade e estágio são obrigatórios' });
+        }
+
         const { error } = await supabase
             .from('historico_oportunidades')
             .insert([{
                 oportunidade_id,
-                estagio_venda: estagioVenda
+                estagio_venda: estagio_venda
             }]);
-        
-        if (error) throw error;
-        res.json({ message: 'Histórico criado com sucesso!' });
-    } catch (err) {
-        console.error('Erro ao criar histórico:', err);
-        res.status(500).json({ error: 'Erro ao criar histórico' });
+
+        if (error) {
+            console.error('Erro ao registrar histórico:', error);
+            return res.status(500).json({ error: 'Erro ao registrar histórico' });
+        }
+
+        res.json({ message: 'Histórico registrado com sucesso' });
+    } catch (error) {
+        console.error('Erro ao registrar histórico:', error);
+        res.status(500).json({ error: 'Erro ao registrar histórico' });
     }
 });
 
@@ -353,17 +406,17 @@ app.put('/api/oportunidades/:id', async (req, res) => {
             regional_id,
             preco,
             margem,
-            estagioVenda,
+            estagio_venda,
             revenda,
             registro,
             bid,
-            validadeBid,
-            validadeProposta,
+            validade_bid,
+            validade_proposta,
             classificacao,
             observacoes,
             trimestre,
-            dataFaturamento,
-            dataWon
+            data_faturamento,
+            data_won
         } = req.body;
 
         // Converte e valida os valores numéricos
@@ -386,51 +439,67 @@ app.put('/api/oportunidades/:id', async (req, res) => {
             }
         }
 
-        // Manter valores existentes se não forem fornecidos novos valores
+        // Validar valores numéricos
+        if (precoNumerico !== undefined && (isNaN(precoNumerico) || precoNumerico <= 0)) {
+            return res.status(400).json({ error: 'Preço deve ser maior que zero' });
+        }
+
+        if (margemNumerica !== undefined && (isNaN(margemNumerica) || margemNumerica <= 0)) {
+            return res.status(400).json({ error: 'Margem deve ser maior que zero' });
+        }
+
+        // Validar regional_id se fornecido
+        if (regional_id !== undefined) {
+            const { data: regionais, error: errorRegionais } = await supabase
+                .from('regionais')
+                .select('*')
+                .eq('id', regional_id);
+
+            if (errorRegionais || !regionais || regionais.length === 0) {
+                return res.status(400).json({ error: 'Regional inválida' });
+            }
+        }
+
+        // Preparar dados para atualização
         const dadosAtualizados = {
             revenda: revenda !== undefined ? revenda : oportunidadeExistente.revenda,
             registro: registro !== undefined ? registro : oportunidadeExistente.registro,
             cliente: cliente !== undefined ? cliente : oportunidadeExistente.cliente,
             bid: bid !== undefined ? bid : oportunidadeExistente.bid,
-            validade_bid: validadeBid !== undefined ? (validadeBid === '' ? null : validadeBid) : oportunidadeExistente.validade_bid,
-            validade_proposta: validadeProposta !== undefined ? (validadeProposta === '' ? null : validadeProposta) : oportunidadeExistente.validade_proposta,
-            preco: preco !== undefined ? precoNumerico : oportunidadeExistente.preco,
-            margem: margem !== undefined ? margemNumerica : oportunidadeExistente.margem,
+            validade_bid: validade_bid !== undefined ? (validade_bid === '' ? null : validade_bid) : oportunidadeExistente.validade_bid,
+            validade_proposta: validade_proposta !== undefined ? (validade_proposta === '' ? null : validade_proposta) : oportunidadeExistente.validade_proposta,
+            preco: precoNumerico !== undefined ? precoNumerico : oportunidadeExistente.preco,
+            margem: margemNumerica !== undefined ? margemNumerica : oportunidadeExistente.margem,
             classificacao: classificacao !== undefined ? classificacao : oportunidadeExistente.classificacao,
             observacoes: observacoes !== undefined ? observacoes : oportunidadeExistente.observacoes,
-            estagio_venda: estagioVenda !== undefined ? estagioVenda : oportunidadeExistente.estagio_venda,
+            estagio_venda: estagio_venda !== undefined ? estagio_venda : oportunidadeExistente.estagio_venda,
             trimestre: trimestre !== undefined ? trimestre : oportunidadeExistente.trimestre,
-            data_won: dataWon !== undefined ? (dataWon === '' ? null : dataWon) : oportunidadeExistente.data_won,
-            data_faturamento: dataFaturamento !== undefined ? (dataFaturamento === '' ? null : dataFaturamento) : oportunidadeExistente.data_faturamento,
+            data_won: data_won !== undefined ? (data_won === '' ? null : data_won) : oportunidadeExistente.data_won,
+            data_faturamento: data_faturamento !== undefined ? (data_faturamento === '' ? null : data_faturamento) : oportunidadeExistente.data_faturamento,
             regional_id: regional_id !== undefined ? regional_id : oportunidadeExistente.regional_id
         };
 
-        console.log('Dados atualizados:', dadosAtualizados);
-
-        const { error } = await supabase
+        // Atualizar a oportunidade
+        const { data: oportunidadeAtualizada, error: errorAtualizacao } = await supabase
             .from('oportunidades')
             .update(dadosAtualizados)
-            .eq('id', id);
+            .eq('id', id)
+            .select();
 
-        if (error) {
-            console.error('Erro ao atualizar oportunidade:', error);
+        if (errorAtualizacao) {
+            console.error('Erro ao atualizar oportunidade:', errorAtualizacao);
             return res.status(500).json({ 
                 error: 'Erro ao atualizar oportunidade',
-                details: error.message,
-                code: error.code,
-                hint: error.hint
+                details: errorAtualizacao.message
             });
         }
 
-        console.log('Oportunidade atualizada com sucesso!');
-        res.json({ message: 'Oportunidade atualizada com sucesso!' });
+        res.json(oportunidadeAtualizada[0]);
     } catch (error) {
         console.error('Erro ao atualizar oportunidade:', error);
         res.status(500).json({ 
             error: 'Erro ao atualizar oportunidade',
-            details: error.message,
-            code: error.code,
-            hint: error.hint
+            details: error.message
         });
     }
 });
